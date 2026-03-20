@@ -1,0 +1,267 @@
+#!/usr/bin/env ros
+#|-*- mode:lisp -*-|#
+#|
+exec ros -Q -- $0 "$@"
+|#
+
+(progn
+  (ros:ensure-asdf)
+  (set-dispatch-macro-character #\# #\f (lambda (s c n) (declare (ignore s c n)) '|#f|))
+  (set-dispatch-macro-character #\# #\t (lambda (s c n) (declare (ignore s c n)) '|#t|)))
+
+(defpackage :ros.script.sbbs-admin
+  (:use :cl))
+(in-package :ros.script.sbbs-admin)
+
+(defun expand-tilde (path)
+  (if (and (>= (length path) 2) (string= (subseq path 0 2) "~/"))
+      (concatenate 'string (namestring (user-homedir-pathname)) (subseq path 2))
+      path))
+
+(defun get-data-dir ()
+  (let ((env (uiop:getenv "SBBS_DATADIR")))
+    (if (and env (not (string= env "")))
+        (expand-tilde env)
+        (namestring (merge-pathnames "bbs/" (user-homedir-pathname))))))
+
+(defun write-scheme (obj stream)
+  (typecase obj
+    (string (prin1 obj stream))
+    (number (princ obj stream))
+    (symbol
+      (cond
+        ((string= (symbol-name obj) "#f") (princ "#f" stream))
+        ((string= (symbol-name obj) "#t") (princ "#t" stream))
+        ((string= (symbol-name obj) "NIL") (princ "()" stream))
+        (t (princ (string-downcase (symbol-name obj)) stream))))
+    (cons
+      (princ "(" stream)
+      (let ((current obj))
+        (loop
+          (write-scheme (car current) stream)
+          (setq current (cdr current))
+          (cond ((null current) (return))
+                ((consp current) (princ " " stream))
+                (t (princ " . " stream)
+                   (write-scheme current stream)
+                   (return)))))
+      (princ ")" stream))
+    (t (prin1 obj stream))))
+
+(defun lookup-def (key alist)
+  (let ((p (assoc key alist :test (lambda (k1 k2) (string-equal (string k1) (string k2))))))
+    (if p
+        (let ((res (cdr p)))
+          (cond ((not (consp res)) res)
+                ((null (cdr res)) (car res))
+                (t res)))
+        nil)))
+
+(defun last-element (lst)
+  (car (last lst)))
+
+(defun take-right (lst n)
+  (let ((len (length lst)))
+    (if (<= len n)
+        lst
+        (nthcdr (- len n) lst))))
+
+(defun take (lst n)
+  (if (or (null lst) (<= n 0))
+      nil
+      (cons (car lst) (take (cdr lst) (1- n)))))
+
+(defun latest-posts (posts)
+  (if (> (length posts) 6)
+      `((|truncated| . |#t|) (|posts| . ,(cons (car posts) (take-right posts 5))))
+      `((|truncated| . |#f|) (|posts| . ,posts))))
+
+(defun build-list-entry (t-entry)
+  (let* ((id (car t-entry))
+         (thread-data (cdr t-entry))
+         (headline (lookup-def 'headline thread-data))
+         (posts (lookup-def 'posts thread-data))
+         (last-post (last-element posts))
+         (date (lookup-def 'date (cdr last-post)))
+         (messages (length posts)))
+    `(,id (|headline| . ,headline) (|date| . ,date) (|messages| . ,messages))))
+
+(defun build-index-entry (t-entry)
+  (let* ((id (car t-entry))
+         (thread-data (cdr t-entry))
+         (headline (lookup-def 'headline thread-data))
+         (posts (lookup-def 'posts thread-data)))
+    `(,id (|headline| . ,headline) . ,(latest-posts posts))))
+
+(defun scheme-string-reader (stream char)
+  (declare (ignore char))
+  (let ((bytes (make-array 0 :element-type '(unsigned-byte 8) :fill-pointer 0 :adjustable t)))
+    (loop
+      (let ((c (read-char stream t nil t)))
+        (cond
+          ((char= c #\") (return (sb-ext:octets-to-string bytes :external-format '(:utf-8 :replacement #\?))))
+          ((char= c #\\)
+           (let ((next-c (read-char stream t nil t)))
+             (cond
+               ((and (char>= next-c #\0) (char<= next-c #\7))
+                (let ((oct-str (make-string 3)))
+                  (setf (char oct-str 0) next-c)
+                  (setf (char oct-str 1) (read-char stream t nil t))
+                  (setf (char oct-str 2) (read-char stream t nil t))
+                  (vector-push-extend (parse-integer oct-str :radix 8) bytes)))
+               ((char= next-c #\n) (vector-push-extend (char-code #\Newline) bytes))
+               ((char= next-c #\t) (vector-push-extend (char-code #\Tab) bytes))
+               ((char= next-c #\r) (vector-push-extend (char-code #\Return) bytes))
+               ((char= next-c #\\) (vector-push-extend (char-code #\\) bytes))
+               ((char= next-c #\") (vector-push-extend (char-code #\") bytes))
+               (t (vector-push-extend (char-code next-c) bytes)))))
+          (t (vector-push-extend (char-code c) bytes)))))))
+
+(set-macro-character #\" #'scheme-string-reader)
+
+(defun get-threads (dir)
+  (let ((threads nil))
+    (loop for i from 1
+          for misses = 0 then (if exists 0 (1+ misses))
+          for filepath = (format nil "~A~D" dir i)
+          for exists = (probe-file filepath)
+          while (<= misses 200)
+          do (when exists
+               (with-open-file (stream filepath :direction :input :external-format :iso-8859-1)
+                 (handler-case
+                     (let ((data (read stream nil nil)))
+                       (when data
+                         (push (cons i data) threads)))
+                   (error (e)
+                     (format *error-output* "Warning: skipping ~A due to read error: ~A~%" filepath e))))))
+    threads))
+
+(defun generate-index (board)
+  (let* ((data-dir (string-right-trim "/" (get-data-dir)))
+         (dir (format nil "~A/sexp/~A/" data-dir board))
+         (threads-data (get-threads dir)))
+    (unless threads-data
+      (format t "No threads found for board ~A.~%" board)
+      (return-from generate-index nil))
+    (let* ((sorted-threads 
+            (sort threads-data
+                  (lambda (a b)
+                    (let* ((posts-a (lookup-def 'posts (cdr a)))
+                           (posts-b (lookup-def 'posts (cdr b)))
+                           (date-a (lookup-def 'date (cdr (last-element posts-a))))
+                           (date-b (lookup-def 'date (cdr (last-element posts-b)))))
+                      (string> date-a date-b)))))
+           (list-entries (mapcar #'build-list-entry sorted-threads))
+           (frontpage-count 10)
+           (index-entries (mapcar #'build-index-entry 
+                                  (if (> (length sorted-threads) frontpage-count)
+                                      (take sorted-threads frontpage-count)
+                                      sorted-threads)))
+           (list-path (format nil "~Alist" dir))
+           (index-path (format nil "~Aindex" dir))
+           (html-list-path (format nil "~A/html/~A/list" data-dir board))
+           (html-index-path (format nil "~A/html/~A/index" data-dir board)))
+      
+      (when (probe-file list-path) (delete-file list-path))
+      (with-open-file (stream list-path :direction :output :if-does-not-exist :create :external-format :utf-8)
+        (write-scheme list-entries stream))
+      
+      (when (probe-file index-path) (delete-file index-path))
+      (with-open-file (stream index-path :direction :output :if-does-not-exist :create :external-format :utf-8)
+        (write-scheme index-entries stream))
+      
+      (when (probe-file html-list-path) (delete-file html-list-path))
+      (when (probe-file html-index-path) (delete-file html-index-path))
+      
+      (format t "Generated list and index for ~A~%" board))))
+
+(defun remove-post (board post-id)
+  (let* ((data-dir (string-right-trim "/" (get-data-dir)))
+         (sexp-file (format nil "~A/sexp/~A/~A" data-dir board post-id))
+         (html-file (format nil "~A/html/~A/~A" data-dir board post-id)))
+    (if (probe-file sexp-file)
+        (progn
+          (delete-file sexp-file)
+          (format t "Removed thread ~A.~%" sexp-file))
+        (format t "Thread ~A does not exist.~%" sexp-file))
+    (when (probe-file html-file)
+      (delete-file html-file)
+      (format t "Removed ~A.~%" html-file))
+    (generate-index board)))
+
+(defun remove-comment (board post-id comment-id-str)
+  (let* ((data-dir (string-right-trim "/" (get-data-dir)))
+         (sexp-file (format nil "~A/sexp/~A/~A" data-dir board post-id))
+         (html-file (format nil "~A/html/~A/~A" data-dir board post-id))
+         (comment-id (parse-integer comment-id-str :junk-allowed t)))
+    (unless (probe-file sexp-file)
+      (format t "Thread ~A does not exist.~%" sexp-file)
+      (return-from remove-comment nil))
+    (let* ((data (with-open-file (stream sexp-file :direction :input :external-format :iso-8859-1)
+                   (read stream nil nil)))
+           (posts (lookup-def 'posts data))
+           (new-posts (remove-if (lambda (p) (= (car p) comment-id)) posts)))
+      (if (= (length posts) (length new-posts))
+          (format t "Comment ~A not found in thread ~A.~%" comment-id post-id)
+          (progn
+            (let ((headline (lookup-def 'headline data)))
+              (when (probe-file sexp-file) (delete-file sexp-file))
+              (with-open-file (stream sexp-file :direction :output :if-does-not-exist :create :external-format :utf-8)
+                (write-scheme `((|headline| . ,headline) (|posts| . ,new-posts)) stream))
+              (format t "Removed comment ~A from thread ~A.~%" comment-id post-id)
+              (when (probe-file html-file)
+                (delete-file html-file)
+                (format t "Removed ~A~%" html-file))
+              (generate-index board)))))))
+
+(defun backup (archive-name)
+  (let* ((data-dir (string-right-trim "/" (get-data-dir))))
+    (uiop:run-program (list "tar" "-czf" archive-name "-C" data-dir "sexp")
+                      :output *standard-output* :error-output *error-output*)
+    (format t "Backup created: ~A~%" archive-name)))
+
+(defun restore (archive-name)
+  (let* ((data-dir (string-right-trim "/" (get-data-dir))))
+    (uiop:run-program (list "tar" "-xzf" archive-name "-C" data-dir)
+                      :output *standard-output* :error-output *error-output*)
+    (format t "Restore completed from: ~A~%" archive-name)))
+
+(defun print-help ()
+  (format t "Usage: sbbs-admin.ros <command> [args...]~%~%")
+  (format t "Commands:~%")
+  (format t "  generate-index <board>                       Regenerate index and list files for a board~%")
+  (format t "  remove-post <board> <post-id>                Remove an entire thread/post~%")
+  (format t "  remove-comment <board> <post-id> <comment-id> Remove a specific comment from a thread~%")
+  (format t "  backup <archive.tar.gz>                      Backup the sexp directory to a tarball~%")
+  (format t "  restore <archive.tar.gz>                     Restore the sexp directory from a tarball~%~%")
+  (format t "Environment Variables:~%")
+  (format t "  SBBS_DATADIR                                 Path to data directory (default: ~~/bbs)~%"))
+
+(defun main (&rest argv)
+  (if (null argv)
+      (print-help)
+      (let ((cmd (first argv)))
+        (cond
+          ((string= cmd "generate-index")
+           (if (>= (length argv) 2)
+               (generate-index (second argv))
+               (format t "Usage: sbbs-admin.ros generate-index <board>~%")))
+          ((string= cmd "remove-post")
+           (if (>= (length argv) 3)
+               (remove-post (second argv) (third argv))
+               (format t "Usage: sbbs-admin.ros remove-post <board> <post-id>~%")))
+          ((string= cmd "remove-comment")
+           (if (>= (length argv) 4)
+               (remove-comment (second argv) (third argv) (fourth argv))
+               (format t "Usage: sbbs-admin.ros remove-comment <board> <post-id> <comment-id>~%")))
+          ((string= cmd "backup")
+           (if (>= (length argv) 2)
+               (backup (second argv))
+               (format t "Usage: sbbs-admin.ros backup <archive.tar.gz>~%")))
+          ((string= cmd "restore")
+           (if (>= (length argv) 2)
+               (restore (second argv))
+               (format t "Usage: sbbs-admin.ros restore <archive.tar.gz>~%")))
+          (t
+           (format t "Unknown command: ~A~%" cmd)
+           (print-help))))))
