@@ -43,7 +43,7 @@ sbbs-admin.ros generate-index <board>
 ```
 **Example:**
 ```sh
-SBBS_DATADIR=data/ ./sbbs-admin.ros generate-index prog
+sbbs-admin.ros generate-index prog
 ```
 
 ### 2. `remove-post`
@@ -55,7 +55,7 @@ sbbs-admin.ros remove-post <board> <post-id>
 ```
 **Example:**
 ```sh
-SBBS_DATADIR=data/ ./sbbs-admin.ros remove-post prog 42
+sbbs-admin.ros remove-post prog 42
 ```
 
 ### 3. `remove-comment`
@@ -68,7 +68,7 @@ sbbs-admin.ros remove-comment <board> <post-id> <comment-id>
 **Example:**
 ```sh
 # Removes comment #5 from thread #42 on the 'prog' board
-SBBS_DATADIR=data/ ./sbbs-admin.ros remove-comment prog 42 5
+sbbs-admin.ros remove-comment prog 42 5
 ```
 
 ### 4. `backup`
@@ -80,7 +80,7 @@ sbbs-admin.ros backup <archive-name.tar.gz>
 ```
 **Example:**
 ```sh
-SBBS_DATADIR=data/ ./sbbs-admin.ros backup my-board-backup.tar.gz
+sbbs-admin.ros backup my-board-backup.tar.gz
 ```
 
 ### 5. `restore`
@@ -92,5 +92,5 @@ sbbs-admin.ros restore <archive-name.tar.gz>
 ```
 **Example:**
 ```sh
-SBBS_DATADIR=data/ ./sbbs-admin.ros restore my-board-backup.tar.gz
+sbbs-admin.ros restore my-board-backup.tar.gz
 ```
