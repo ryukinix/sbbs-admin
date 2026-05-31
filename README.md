@@ -1,6 +1,6 @@
 # SchemeBBS Administration Tool (`sbbs-admin.ros`)
 
-`sbbs-admin.ros` is a standalone Common Lisp CLI script powered by [Roswell](https://github.com/roswell/roswell) to manage [SchemeBBS](https://github.com/naughtybits/schemebbs) instances. It operates directly on the underlying S-Expression (`sexp`) database, bypassing the need for a running Scheme environment and naturally handling Scheme's idiosyncratic data formats.
+`sbbs-admin.ros` is a standalone Common Lisp CLI script powered by [Roswell](https://github.com/roswell/roswell) to manage [SchemeBBS](https://github.com/alyssa-p-hacker/SchemeBBS) instances. It operates directly on the underlying S-Expression (`sexp`) database, bypassing the need for a running Scheme environment and naturally handling Scheme's idiosyncratic data formats.
 
 ## Features
 
