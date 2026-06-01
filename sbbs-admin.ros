@@ -203,9 +203,9 @@ exec ros -Q -- $0 "$@"
         (format t "No backups found.~%"))))
 
 (defun ask-confirmation (prompt)
-  (format *query-io* "~A [y/N]: " prompt)
-  (force-output *query-io*)
-  (let ((response (read-line *query-io* nil "")))
+  (format t "~A [y/N]: " prompt)
+  (force-output)
+  (let ((response (read-line *standard-input* nil "")))
     (or (string-equal response "y")
         (string-equal response "yes"))))
 
@@ -447,11 +447,77 @@ exec ros -Q -- $0 "$@"
         (generate-index board)))))
 
 
+(defun find-duplicates (posts)
+  (let ((duplicates nil)
+        (prev-post (car posts)))
+    (dolist (curr-post (cdr posts))
+      (let ((prev-content (lookup-def 'content (cdr prev-post)))
+            (curr-content (lookup-def 'content (cdr curr-post))))
+        (if (equal prev-content curr-content)
+            (push curr-post duplicates)
+            (setf prev-post curr-post))))
+    (nreverse duplicates)))
+
+(defun remove-duplicates-command ()
+  (let* ((data-dir (string-right-trim "/" (get-data-dir)))
+         (sexp-dir (format nil "~A/sexp/" data-dir))
+         (boards (uiop:subdirectories (uiop:ensure-absolute-pathname sexp-dir (uiop:getcwd))))
+         (all-duplicates nil))
+    ;; Phase 1: Collect duplicates
+    (dolist (board-path boards)
+      (let* ((board (car (last (pathname-directory board-path))))
+             (threads (uiop:directory-files board-path)))
+        (dolist (thread-path threads)
+          (let ((thread-id (pathname-name thread-path)))
+            (when (ignore-errors (parse-integer thread-id))
+              (let* ((data (with-open-file (stream thread-path :direction :input :external-format :iso-8859-1)
+                             (read stream nil nil)))
+                     (posts (lookup-def 'posts data))
+                     (dups (find-duplicates posts)))
+                (when dups
+                  (push (list board thread-id dups thread-path data) all-duplicates))))))))
+    
+    ;; Phase 2: Show and confirm
+    (if (null all-duplicates)
+        (format t "No sequential duplicate comments found.~%")
+        (progn
+          (format t "Found sequential duplicate comments:~%~%")
+          (dolist (entry (reverse all-duplicates))
+            (destructuring-bind (board thread-id dups thread-path data) entry
+              (declare (ignore thread-path data))
+              (format t "Board: ~A, Thread: ~A~%" board thread-id)
+              (dolist (dup dups)
+                (let ((comment-id (car dup))
+                      (content (lookup-def 'content (cdr dup))))
+                  (format t "  - Duplicate Comment ID: ~A~%" comment-id)
+                  (format t "    Content: ~A~%" (with-output-to-string (s) (write-scheme content s)))))))
+          
+          (format t "~%")
+          (when (ask-confirmation "Are you sure you want to delete these duplicate comments?")
+            ;; Phase 3: Backup and Delete
+            (backup "Before removing sequential duplicate comments")
+            (let ((affected-boards nil))
+              (dolist (entry all-duplicates)
+                (destructuring-bind (board thread-id dups thread-path data) entry
+                  (let* ((headline (lookup-def 'headline data))
+                         (posts (lookup-def 'posts data))
+                         (dup-ids (mapcar #'car dups))
+                         (new-posts (remove-if (lambda (p) (member (car p) dup-ids)) posts)))
+                    (with-open-file (stream thread-path :direction :output :if-exists :supersede :if-does-not-exist :create :external-format :utf-8)
+                      (write-scheme `((|headline| . ,headline) (|posts| ,new-posts)) stream))
+                    (pushnew board affected-boards :test #'string-equal)
+                    (format t "Removed ~D duplicates from ~A/~A~%" (length dups) board thread-id))))
+              
+              ;; Phase 4: Regenerate indices
+              (dolist (board affected-boards)
+                (generate-index board))))))))
+
 (defun print-help ()
   (format t "Usage: sbbs-admin.ros <command> [args...]~%~%")
   (format t "Commands:~%")
   (format t "  generate-index <board>                       Regenerate index and list files for a board~%")
   (format t "  remove-post <board> <post-id>                Remove an entire thread/post~%")
+  (format t "  remove-duplicates                            Remove sequential duplicate comments across all boards~%")
   (format t "  remove-comment <board> <post-id> <comment-id> Remove a specific comment from a thread~%")
   (format t "  edit <board> <post-id> <comment-id>          Edit a specific comment using $EDITOR~%")
   (format t "  move <source-board> <post-id> <target-board> Move a thread to a different board~%")
@@ -475,6 +541,8 @@ exec ros -Q -- $0 "$@"
                (if (>= (length argv) 3)
                    (remove-post (second argv) (third argv))
                    (format t "Usage: sbbs-admin.ros remove-post <board> <post-id>~%")))
+              ((string= cmd "remove-duplicates")
+               (remove-duplicates-command))
               ((string= cmd "remove-comment")
                (if (>= (length argv) 4)
                    (remove-comment (second argv) (third argv) (fourth argv))

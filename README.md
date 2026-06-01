@@ -7,8 +7,10 @@
 - **No external dependencies:** Pure Common Lisp via Roswell.
 - **Robust UTF-8 and S-Expression Parsing:** Capable of reading MIT Scheme's octal escape sequences (e.g., `\237\215` for emojis like 🍻) and parsing `#f`/`#t` boolean values correctly.
 - **Index Generation:** Completely reconstructs the board's `list` and `index` files based on raw post data, fixing any desync issues.
-- **Content Moderation:** Safely delete entire threads or specific comments within a thread, automatically regenerating the index and clearing HTML caches.
-- **Backup & Restore:** Easily backup the entire `sexp` database to a tarball and restore it when needed.
+- **Content Moderation:** Safely delete entire threads, specific comments, or edit comment content using your favorite `$EDITOR`. Automatically removes sequential duplicate comments across all boards. Regenerates indices and clears HTML caches.
+- **Thread Management:** Move threads between different boards seamlessly.
+- **Backup & Restore:** Easily backup the entire `sexp` directory to a tarball with optional descriptions and restore them with ease.
+- **Timezone Adjustment:** Bulk update the timestamps of all posts across all boards.
 - **Environment Driven:** Uses `SBBS_DATADIR` to locate the data directory.
 
 ## Installation
@@ -71,26 +73,71 @@ sbbs-admin.ros remove-comment <board> <post-id> <comment-id>
 sbbs-admin.ros remove-comment prog 42 5
 ```
 
-### 4. `backup`
-Creates a compressed tarball (`.tar.gz`) backup of the entire `sexp` directory.
+### 4. `remove-duplicates`
+Scans all boards and threads for sequential comments that have identical content. It displays the found duplicates and prompts for confirmation before deleting the second comment in each duplicate pair. A backup is automatically created before any deletions occur.
 
 **Usage:**
 ```sh
-sbbs-admin.ros backup <archive-name.tar.gz>
-```
-**Example:**
-```sh
-sbbs-admin.ros backup my-board-backup.tar.gz
+sbbs-admin.ros remove-duplicates
 ```
 
-### 5. `restore`
-Restores the `sexp` directory from a previously created backup tarball.
+### 5. `edit`
+Opens a specific comment's content in your system's `$EDITOR` (defaults to `vi`). After saving and exiting the editor, the thread's S-Expression file is updated, a backup is created, and the board's index is regenerated.
 
 **Usage:**
 ```sh
-sbbs-admin.ros restore <archive-name.tar.gz>
+sbbs-admin.ros edit <board> <post-id> <comment-id>
 ```
 **Example:**
 ```sh
-sbbs-admin.ros restore my-board-backup.tar.gz
+sbbs-admin.ros edit prog 42 5
+```
+
+### 5. `move`
+Moves an entire thread from a source board to a target board. It assigns a new post ID in the target board, removes the old files, and regenerates indices for both boards.
+
+**Usage:**
+```sh
+sbbs-admin.ros move <source-board> <post-id> <target-board>
+```
+**Example:**
+```sh
+# Moves thread #42 from 'tmp' board to 'prog'
+sbbs-admin.ros move tmp 42 prog
+```
+
+### 6. `backup`
+Creates a compressed tarball (`.tar.gz`) backup of the entire `sexp` directory. You can optionally provide a description message which will be stored alongside the backup, or specify a custom filename.
+
+**Usage:**
+```sh
+# Create a backup with a description
+sbbs-admin.ros backup "Maintenance before update"
+
+# Create a backup with a specific filename
+sbbs-admin.ros backup manual-backup-2023.tar.gz
+```
+
+### 7. `restore`
+Restores the `sexp` directory from a backup tarball. If no argument is provided, it lists all available backups in the `backup/` directory.
+
+**Usage:**
+```sh
+# List all available backups
+sbbs-admin.ros restore
+
+# Restore from a specific backup file
+sbbs-admin.ros restore sbbs-2023-06-01.tar.gz
+```
+
+### 8. `set-timezone`
+Adjusts the timestamps of ALL posts across ALL boards by a specified number of hours. This is useful if your system clock was misconfigured or you're migrating between servers with different timezone settings. It automatically regenerates all board indices after the update.
+
+**Usage:**
+```sh
+# Move all timestamps forward by 2 hours
+sbbs-admin.ros set-timezone 2
+
+# Move all timestamps back by 3 hours
+sbbs-admin.ros set-timezone -3
 ```
