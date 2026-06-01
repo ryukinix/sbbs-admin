@@ -336,7 +336,7 @@ exec ros -Q -- $0 "$@"
                                   :output :interactive
                                   :input :interactive
                                   :error-output :interactive)
-                (let ((new-content-value (with-open-file (stream tmp-path :direction :input :external-format :utf-8)
+                (let ((new-content-value (with-open-file (stream tmp-path :direction :input :external-format :iso-8859-1)
                                            (read stream nil nil))))
                   (delete-file tmp-path)
                   (when new-content-value
