@@ -36,7 +36,25 @@ The script relies on the `SBBS_DATADIR` environment variable to locate the root 
 
 ## Commands
 
-### 1. `generate-index`
+### 1. `list`
+A versatile command to explore the BBS data at different levels:
+- **No arguments:** Lists all available boards.
+- **`<board>`:** Lists all threads in the specified board, showing their ID, last update date, and headline (sorted by latest update).
+- **`<board> <post-id>`:** Lists all comments in a specific thread, including metadata (date, author) and content.
+
+**Usage:**
+```sh
+# List all boards
+sbbs-admin.ros list
+
+# List threads in the 'prog' board
+sbbs-admin.ros list prog
+
+# List comments in thread #42 on the 'prog' board
+sbbs-admin.ros list prog 42
+```
+
+### 2. `generate-index`
 Regenerates the `list` and `index` files for a specific board by scanning all available threads. It accurately sorts threads by the date of their latest post and calculates the correct message counts. It also removes the cached HTML index files to ensure the BBS serves the updated data.
 
 **Usage:**
@@ -48,7 +66,7 @@ sbbs-admin.ros generate-index <board>
 sbbs-admin.ros generate-index prog
 ```
 
-### 2. `remove-post`
+### 3. `remove-post`
 Deletes an entire thread (post) and its associated HTML cache, then automatically regenerates the board's index.
 
 **Usage:**
@@ -60,7 +78,7 @@ sbbs-admin.ros remove-post <board> <post-id>
 sbbs-admin.ros remove-post prog 42
 ```
 
-### 3. `remove-comment`
+### 4. `remove-comment`
 Deletes a specific comment from within a thread. It rewrites the thread's S-Expression file without the specified comment, deletes the thread's HTML cache, and regenerates the board's index to reflect the updated message count.
 
 **Usage:**
@@ -73,7 +91,7 @@ sbbs-admin.ros remove-comment <board> <post-id> <comment-id>
 sbbs-admin.ros remove-comment prog 42 5
 ```
 
-### 4. `remove-duplicates`
+### 5. `remove-duplicates`
 Scans all boards and threads for sequential comments that have identical content. It displays the found duplicates and prompts for confirmation before deleting the second comment in each duplicate pair. A backup is automatically created before any deletions occur.
 
 **Usage:**
@@ -81,7 +99,7 @@ Scans all boards and threads for sequential comments that have identical content
 sbbs-admin.ros remove-duplicates
 ```
 
-### 5. `edit`
+### 6. `edit`
 Opens a specific comment's content in your system's `$EDITOR` (defaults to `vi`). After saving and exiting the editor, the thread's S-Expression file is updated, a backup is created, and the board's index is regenerated.
 
 **Usage:**
@@ -93,7 +111,7 @@ sbbs-admin.ros edit <board> <post-id> <comment-id>
 sbbs-admin.ros edit prog 42 5
 ```
 
-### 5. `move`
+### 7. `move`
 Moves an entire thread from a source board to a target board. It assigns a new post ID in the target board, removes the old files, and regenerates indices for both boards.
 
 **Usage:**
@@ -106,7 +124,7 @@ sbbs-admin.ros move <source-board> <post-id> <target-board>
 sbbs-admin.ros move tmp 42 prog
 ```
 
-### 6. `backup`
+### 8. `backup`
 Creates a compressed tarball (`.tar.gz`) backup of the entire `sexp` directory. You can optionally provide a description message which will be stored alongside the backup, or specify a custom filename.
 
 **Usage:**
@@ -118,7 +136,7 @@ sbbs-admin.ros backup "Maintenance before update"
 sbbs-admin.ros backup manual-backup-2023.tar.gz
 ```
 
-### 7. `restore`
+### 9. `restore`
 Restores the `sexp` directory from a backup tarball. If no argument is provided, it lists all available backups in the `backup/` directory.
 
 **Usage:**
@@ -130,7 +148,7 @@ sbbs-admin.ros restore
 sbbs-admin.ros restore sbbs-2023-06-01.tar.gz
 ```
 
-### 8. `set-timezone`
+### 10. `set-timezone`
 Adjusts the timestamps of ALL posts across ALL boards by a specified number of hours. This is useful if your system clock was misconfigured or you're migrating between servers with different timezone settings. It automatically regenerates all board indices after the update.
 
 **Usage:**

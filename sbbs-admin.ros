@@ -415,6 +415,62 @@ exec ros -Q -- $0 "$@"
          (new-ut (+ ut (* offset-hours 3600))))
     (format-post-date new-ut)))
 
+(defun list-all (&optional board post-id-str)
+  (let* ((data-dir (string-right-trim "/" (get-data-dir)))
+         (sexp-dir (format nil "~A/sexp/" data-dir)))
+    (cond
+      ;; Level 1: List all boards
+      ((null board)
+       (let ((boards (uiop:subdirectories (uiop:ensure-absolute-pathname sexp-dir (uiop:getcwd)))))
+         (if boards
+             (progn
+               (format t "Boards:~%")
+               (dolist (b-path boards)
+                 (format t "  ~A~%" (car (last (pathname-directory b-path))))))
+             (format t "No boards found in ~A~%" sexp-dir))))
+
+      ;; Level 3: List all comments in a thread
+      ((and board post-id-str)
+       (let* ((sexp-file (format nil "~A/sexp/~A/~A" data-dir board post-id-str))
+              (post-id (parse-integer post-id-str :junk-allowed t)))
+         (if (and post-id (probe-file sexp-file))
+             (let* ((data (with-open-file (stream sexp-file :direction :input :external-format :iso-8859-1)
+                            (read stream nil nil)))
+                    (headline (lookup-def 'headline data))
+                    (posts (lookup-def 'posts data)))
+               (format t "Thread ~A: ~A~%" post-id-str headline)
+               (dolist (p posts)
+                 (let* ((cid (car p))
+                        (pdata (cdr p))
+                        (date (lookup-def 'date pdata))
+                        (author (lookup-def 'name pdata))
+                        (content (lookup-def 'content pdata)))
+                   (format t "~%[~A] #~A by ~A~%" date cid (or author "Anonymous"))
+                   (format t "~A~%" content))))
+             (format t "Thread ~A not found in board ~A.~%" post-id-str board))))
+
+      ;; Level 2: List all threads in a board
+      (board
+       (let* ((board-dir (format nil "~A/sexp/~A/" data-dir board))
+              (threads-data (get-threads board-dir)))
+         (if threads-data
+             (progn
+               (format t "Threads in board ~A:~%" board)
+               (format t "~10A ~20A ~A~%" "ID" "Last Update" "Headline")
+               (format t "~v@{~A~:*~}~%" 60 "-")
+               (dolist (t-data (sort threads-data
+                                     (lambda (a b)
+                                       (let ((ut-a (parse-post-date (lookup-def 'date (cdr (last-element (lookup-def 'posts (cdr a)))))))
+                                             (ut-b (parse-post-date (lookup-def 'date (cdr (last-element (lookup-def 'posts (cdr b))))))))
+                                         (> ut-a ut-b)))))
+                 (let* ((tid (car t-data))
+                        (t-content (cdr t-data))
+                        (headline (lookup-def 'headline t-content))
+                        (posts (lookup-def 'posts t-content))
+                        (last-date (lookup-def 'date (cdr (last-element posts)))))
+                   (format t "~10D ~20A ~A~%" tid last-date headline))))
+             (format t "No threads found in board ~A.~%" board)))))))
+
 (defun set-timezone (offset-hours)
   (backup (format nil "Before setting timezone offset to ~D" offset-hours))
   (let* ((data-dir (string-right-trim "/" (get-data-dir)))
@@ -516,6 +572,7 @@ exec ros -Q -- $0 "$@"
   (format t "Usage: sbbs-admin.ros <command> [args...]~%~%")
   (format t "Commands:~%")
   (format t "  generate-index <board>                       Regenerate index and list files for a board~%")
+  (format t "  list [board] [post-id]                       List boards, threads in a board, or comments in a thread~%")
   (format t "  remove-post <board> <post-id>                Remove an entire thread/post~%")
   (format t "  remove-duplicates                            Remove sequential duplicate comments across all boards~%")
   (format t "  remove-comment <board> <post-id> <comment-id> Remove a specific comment from a thread~%")
@@ -533,7 +590,10 @@ exec ros -Q -- $0 "$@"
           (print-help)
           (let ((cmd (first argv)))
             (cond
+              ((string= cmd "list")
+               (list-all (second argv) (third argv)))
               ((string= cmd "generate-index")
+
                (if (>= (length argv) 2)
                    (generate-index (second argv))
                    (format t "Usage: sbbs-admin.ros generate-index <board>~%")))
